@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ design.name }} | Виртуално студио за маникюр</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; background: #f8f4f8; color: #333; }
+        header { background: #8e5ea2; color: white; padding: 20px; text-align: center; }
+        main { max-width: 1000px; margin: 0 auto; padding: 30px 20px; }
+        .design-wrapper { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start; }
+        .design-card, .upload-card { background: white; border-radius: 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08); overflow: hidden; }
+        .design-card img { width: 100%; height: 420px; object-fit: cover; display: block; }
+        .design-card .content, .upload-card .content { padding: 20px; }
+        .upload-card form { display: flex; flex-direction: column; gap: 12px; }
+        .back-link { display: inline-block; margin-bottom: 20px; text-decoration: none; color: #8e5ea2; font-weight: bold; }
+        .errors { color: #b00020; font-size: 14px; margin: 0; padding: 0; list-style: none; }
+        .camera-box { background: #f7f7f7; border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
+        .camera-box video, .camera-box canvas { width: 100%; border-radius: 8px; background: #000; }
+        .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+        button, .btn-lite {
+            border: none; background: #8e5ea2; color: white; padding: 10px 14px; border-radius: 8px; cursor: pointer;
+        }
+        .btn-lite { background: #6c757d; }
+        @media (max-width: 768px) { .design-wrapper { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+<header><h1>Виртуално студио за маникюр</h1></header>
+<main>
+    <a class="back-link" href="{% url 'main:index' %}">← Обратно към галерията</a>
+    <div class="design-wrapper">
+        <section class="design-card">
+            <img src="{{ design.gallery_image.url }}" alt="{{ design.name }}">
+            <div class="content">
+                <h2>{{ design.name }}</h2>
+                <p>Качи снимка или заснеми директно от камерата.</p>
+            </div>
+        </section>
+        <section class="upload-card">
+            <div class="content">
+                <h2>Качване / Камера</h2>
+                <form method="post" action="{% url 'main:upload_hand_image' design.id %}" enctype="multipart/form-data" id="upload-form">
+                    {% csrf_token %}
+
+                    {% if form.non_field_errors %}
+                        <ul class="errors">
+                            {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+
+                    <label for="{{ form.original_image.id_for_label }}">Качи файл</label>
+                    {{ form.original_image }}
+
+                    {{ form.captured_image }}
+
+                    {% if form.original_image.errors %}
+                        <ul class="errors">
+                            {% for error in form.original_image.errors %}<li>{{ error }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+
+                    <div class="camera-box">
+                        <video id="camera" autoplay playsinline></video>
+                        <canvas id="snapshot" style="display:none;"></canvas>
+                        <div class="btn-row" style="margin-top:10px;">
+                            <button type="button" id="start-camera">Стартирай камера</button>
+                            <button type="button" id="take-photo" class="btn-lite">Снимай</button>
+                            <button type="button" id="switch-camera" class="btn-lite">Смени камера</button>
+                        </div>
+                        <label style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+                            <input type="checkbox" id="mirror-preview" checked>
+                            Огледален преглед (само визуално)
+                        </label>
+                    </div>
+
+                    <button type="submit">Продължи</button>
+                </form>
+            </div>
+        </section>
+    </div>
+</main>
+
+<script type="javascript">
+const startBtn = document.getElementById('start-camera');
+const takeBtn = document.getElementById('take-photo');
+const switchBtn = document.getElementById('switch-camera');
+const mirrorCheckbox = document.getElementById('mirror-preview');
+
+const video = document.getElementById('camera');
+const canvas = document.getElementById('snapshot');
+const capturedField = document.getElementById('id_captured_image');
+
+let stream = null;
+let facingMode = "user"; // "user" | "environment"
+
+function applyMirrorPreview() {
+    video.style.transform = mirrorCheckbox.checked ? "scaleX(-1)" : "none";
+}
+
+async function startCamera() {
+    try {
+        if (stream) {
+            stream.getTracks().forEach(t => t.stop());
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+        });
+        video.srcObject = stream;
+        applyMirrorPreview();
+    } catch (e) {
+        alert("Камерата не е достъпна. Провери разрешенията.");
+    }
+}
+
+function captureCroppedFrame() {
+    if (!video.srcObject || !video.videoWidth || !video.videoHeight) {
+        alert("Първо стартирай камерата.");
+        return;
+    }
+
+    // Целеви размер за backend (по-стабилен за обработка)
+    const OUT_W = 768;
+    const OUT_H = 1024; // portrait 3:4
+
+    canvas.width = OUT_W;
+    canvas.height = OUT_H;
+
+    const ctx = canvas.getContext('2d');
+
+    // center-crop към 3:4 от реалния кадър
+    const srcW = video.videoWidth;
+    const srcH = video.videoHeight;
+    const targetRatio = OUT_W / OUT_H;
+    const srcRatio = srcW / srcH;
+
+    let cropW, cropH, cropX, cropY;
+    if (srcRatio > targetRatio) {
+        cropH = srcH;
+        cropW = Math.floor(srcH * targetRatio);
+        cropX = Math.floor((srcW - cropW) / 2);
+        cropY = 0;
+    } else {
+        cropW = srcW;
+        cropH = Math.floor(srcW / targetRatio);
+        cropX = 0;
+        cropY = Math.floor((srcH - cropH) / 2);
+    }
+
+    // ВАЖНО: записваме НЕогледален кадър за обработка
+    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, OUT_W, OUT_H);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    capturedField.value = dataUrl;
+    alert("Снимката е заснета. Натисни „Продължи“.");
+}
+
+startBtn.addEventListener('click', startCamera);
+
+switchBtn.addEventListener('click', async () => {
+    facingMode = facingMode === "user" ? "environment" : "user";
+    await startCamera();
+});
+
+mirrorCheckbox.addEventListener('change', applyMirrorPreview);
+
+takeBtn.addEventListener('click', captureCroppedFrame);
+</script>
+</body>
+</html>
