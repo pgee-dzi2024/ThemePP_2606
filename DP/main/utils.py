@@ -304,63 +304,69 @@ def apply_design_overlay(hand_image_path, design_image_path, output_path, alpha=
     hand_width, hand_height = hand_image.size
     overlay_done = False
 
+    logger.info("MediaPipe available: %s", is_mediapipe_available())
+
     if is_mediapipe_available():
-        detection = detect_hand_landmarks_and_nails(hand_image_path, output_path=None)
+        try:
+            detection = detect_hand_landmarks_and_nails(hand_image_path, output_path=None)
 
-        if detection["found"] and detection["nail_regions"]:
-            logger.info("USING PER-FINGER BRANCH")
+            logger.info("Detection found: %s", detection.get("found"))
+            logger.info("Nail regions count: %s", len(detection.get("nail_regions", {})))
 
-            for finger_name in ["thumb", "index", "middle", "ring", "pinky"]:
-                region = detection["nail_regions"].get(finger_name)
-                if not region:
-                    continue
+            if detection["found"] and detection["nail_regions"]:
+                logger.info("USING PER-FINGER BRANCH")
 
-                rules = FINGER_OVERLAY_RULES.get(finger_name, {})
+                for finger_name in ["thumb", "index", "middle", "ring", "pinky"]:
+                    region = detection["nail_regions"].get(finger_name)
+                    if not region:
+                        continue
 
-                center_x, center_y = region["center"]
-                base_angle = region["angle"]
+                    rules = FINGER_OVERLAY_RULES.get(finger_name, {})
 
-                center_x += rules.get("center_x_shift", 0)
-                center_y += rules.get("center_y_shift", 0)
-                center_y += GLOBAL_NAIL_Y_SHIFT
+                    center_x, center_y = region["center"]
+                    base_angle = region["angle"]
 
-                raw_angle = base_angle + SPRITE_BASE_ANGLE_OFFSET + rules.get("angle_shift", 0)
-                angle_min = rules.get("angle_min", -180)
-                angle_max = rules.get("angle_max", 180)
-                angle = max(angle_min, min(angle_max, raw_angle))
+                    center_x += rules.get("center_x_shift", 0)
+                    center_y += rules.get("center_y_shift", 0)
+                    center_y += GLOBAL_NAIL_Y_SHIFT
 
-                # Увеличение почти 2х по ширина
-                target_w = int(
-                    region["width"]
-                    * rules.get("width_multiplier", 1.0)
-                    * GLOBAL_NAIL_WIDTH_SCALE
-                )
-                max_h = int(
-                    region["height"]
-                    * rules.get("height_multiplier", 1.0)
-                    * GLOBAL_NAIL_HEIGHT_SCALE
-                )
-                # Част от процеса на наслагване за конкретен пръст
-                finger_overlay = design_image.copy()
-                finger_overlay = _resize_image_for_nail(
-                    image=finger_overlay,
-                    target_width=target_w,
-                    max_height=max_h,
-                )
+                    raw_angle = base_angle + SPRITE_BASE_ANGLE_OFFSET + rules.get("angle_shift", 0)
+                    angle_min = rules.get("angle_min", -180)
+                    angle_max = rules.get("angle_max", 180)
+                    angle = max(angle_min, min(angle_max, raw_angle))
 
-                alpha_channel = finger_overlay.getchannel("A").point(lambda p: int(p * alpha))
-                finger_overlay.putalpha(alpha_channel)
+                    target_w = int(
+                        region["width"]
+                        * rules.get("width_multiplier", 1.0)
+                        * GLOBAL_NAIL_WIDTH_SCALE
+                    )
+                    max_h = int(
+                        region["height"]
+                        * rules.get("height_multiplier", 1.0)
+                        * GLOBAL_NAIL_HEIGHT_SCALE
+                    )
 
-                # Наслагване с отчитане на ротацията (ъгъла на пръста)
-                _paste_rotated_overlay(
-                    base_image=hand_image,
-                    overlay_image=finger_overlay,
-                    center_x=center_x,
-                    center_y=center_y,
-                    angle_deg=angle,
-                )
+                    finger_overlay = design_image.copy()
+                    finger_overlay = _resize_image_for_nail(
+                        image=finger_overlay,
+                        target_width=target_w,
+                        max_height=max_h,
+                    )
 
-                overlay_done = True
+                    alpha_channel = finger_overlay.getchannel("A").point(lambda p: int(p * alpha))
+                    finger_overlay.putalpha(alpha_channel)
+
+                    _paste_rotated_overlay(
+                        base_image=hand_image,
+                        overlay_image=finger_overlay,
+                        center_x=center_x,
+                        center_y=center_y,
+                        angle_deg=angle,
+                    )
+
+                    overlay_done = True
+        except Exception as exc:
+            logger.exception("MediaPipe обработката не успя и ще се използва fallback: %s", exc)
 
     if not overlay_done:
         logger.info("USING FALLBACK BRANCH")
