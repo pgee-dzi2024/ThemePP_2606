@@ -42,15 +42,6 @@ def index(request):
     designs = ManicureDesign.objects.all().order_by("-created_at")
     return render(request, "main/index.html", {"designs": designs})
 
-def index_old(request):
-    designs = ManicureDesign.objects.all().order_by("-created_at")
-    return render(request, "main/index_old.html", {"designs": designs})
-
-def index_gpt(request):
-    designs = ManicureDesign.objects.all().order_by("-created_at")
-    return render(request, "main/index_gpt.html", {"designs": designs})
-
-
 def design_detail(request, design_id):
     design = get_object_or_404(ManicureDesign, pk=design_id)
     form = HandImageUploadForm()
